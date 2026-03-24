@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CialControl</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Inter',sans-serif}
+body{background:#d0d7dd;color:#0f172a}
+.hidden{display:none}
+
+.login{height:100vh;display:flex;align-items:center;justify-content:center}
+.login-box{display:grid;grid-template-columns:1fr 1fr;width:900px;background:white;border-radius:20px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.2)}
+.left{background:linear-gradient(120deg,#6d28d9,#0ea5e9,#22d3ee);color:white;padding:40px}
+.right{padding:40px}
+input{width:100%;padding:12px;margin:10px 0;border-radius:10px;border:1px solid #ccc}
+button{width:100%;padding:12px;border:none;border-radius:10px;background:linear-gradient(120deg,#6d28d9,#0ea5e9,#22d3ee);color:white;font-weight:600;cursor:pointer;margin-top:5px}
+
+.sidebar{position:fixed;width:250px;height:100%;background:#0f172a;color:white;padding:20px}
+.sidebar h2{margin-bottom:25px}
+.sidebar div{margin:12px 0;cursor:pointer;opacity:0.85}
+.sidebar div:hover{opacity:1}
+
+.main{margin-left:270px;padding:30px}
+.header{display:flex;justify-content:space-between;margin-bottom:20px}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px}
+.card{background:white;padding:20px;border-radius:15px;box-shadow:0 5px 20px rgba(0,0,0,0.1)}
+
+.table{margin-top:20px;background:white;padding:15px;border-radius:10px}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div class="login" id="login">
+  <div class="login-box">
+    <div class="left">
+      <h1>CialControl</h1>
+      <p>Controle financeiro inteligente</p>
+    </div>
+    <div class="right">
+      <h2>Login</h2>
+      <input id="email" placeholder="Email">
+      <input id="senha" type="password" placeholder="Senha">
+      <button onclick="loginUser()">Entrar</button>
+      <button onclick="registerUser()" style="background:#0f172a">Criar Conta</button>
+      <p id="erro" style="color:red"></p>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <div class="sidebar">
+    <h2>CialControl</h2>
+    <div onclick="showDashboard()">Dashboard</div>
+    <div onclick="addProduto()">Cadastrar Produto</div>
+    <div onclick="downloadFluxo()">Baixar Fluxo de Caixa</div>
+    <div onclick="downloadSKU()">Exportar SKUs</div>
+    <div onclick="emitirNota()">Emitir Nota Fiscal</div>
+    <div onclick="relatorioFinanceiro()">Relatório Financeiro</div>
+    <div onclick="backupDados()">Backup de Dados</div>
+    <div onclick="logout()">Sair</div>
+  </div>
+
+  <div class="main">
+    <div class="header">
+      <h2>Dashboard</h2>
+      <div>Saldo: R$ <span id="saldo">0</span></div>
+    </div>
+
+    <div class="grid">
+      <div class="card">Receita: R$ <span id="receita">0</span></div>
+      <div class="card">Despesa: R$ <span id="despesa">0</span></div>
+      <div class="card">Produtos: <span id="estoque">0</span></div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <canvas id="grafico"></canvas>
+    </div>
+
+    <button onclick="addReceita()">+ Receita</button>
+    <button onclick="addDespesa()">+ Despesa</button>
+
+    <div class="table">
+      <h3>Produtos</h3>
+      <table width="100%">
+        <thead><tr><th>Nome</th><th>SKU</th></tr></thead>
+        <tbody id="lista"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import { getFirestore, collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyATKx03HMwS0F5XldGGmlsQfdTdcEFhY10",
+  authDomain: "cialcontrol-daf76.firebaseapp.com",
+  projectId: "cialcontrol-daf76"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let receita=0, despesa=0, chart;
+
+window.loginUser = async function(){
+  try{
+    await signInWithEmailAndPassword(auth, email.value, senha.value);
+    document.getElementById('login').style.display='none';
+    document.getElementById('app').classList.remove('hidden');
+    carregarProdutos();
+    gerarGrafico();
+  }catch(e){erro.innerText=e.message}
+}
+
+window.registerUser = async function(){
+  await createUserWithEmailAndPassword(auth, email.value, senha.value);
+  alert('Conta criada');
+}
+
+window.logout = async function(){
+  await signOut(auth);
+  location.reload();
+}
+
+window.addProduto = async function(){
+  const nome = prompt('Produto');
+  if(!nome) return;
+  await addDoc(collection(db,"produtos"),{nome,sku:'SKU-'+Date.now()});
+  carregarProdutos();
+}
+
+async function carregarProdutos(){
+  lista.innerHTML='';
+  const dados = await getDocs(collection(db,"produtos"));
+  dados.forEach(doc=>{
+    let p=doc.data();
+    lista.innerHTML+=`<tr><td>${p.nome}</td><td>${p.sku}</td></tr>`;
+  });
+  estoque.innerText = dados.size;
+}
+
+window.addReceita=function(){
+  let v=prompt('Valor'); if(!v)return;
+  receita+=Number(v);
+  atualizar();
+}
+
+window.addDespesa=function(){
+  let v=prompt('Valor'); if(!v)return;
+  despesa+=Number(v);
+  atualizar();
+}
+
+function atualizar(){
+  document.getElementById('receita').innerText=receita;
+  document.getElementById('despesa').innerText=despesa;
+  document.getElementById('saldo').innerText=receita-despesa;
+  gerarGrafico();
+}
+
+function gerarGrafico(){
+  const ctx=document.getElementById('grafico');
+  if(chart) chart.destroy();
+  chart=new Chart(ctx,{type:'bar',data:{labels:['Receita','Despesa'],datasets:[{data:[receita,despesa]}]}});
+}
+
+// FUNÇÕES EXTRAS
+window.downloadFluxo = function(){
+  alert('Baixando fluxo de caixa (simulado)');
+}
+
+window.downloadSKU = function(){
+  alert('Exportando SKUs (simulado)');
+}
+
+window.emitirNota = function(){
+  alert('Integração com NF futura');
+}
+
+window.relatorioFinanceiro = function(){
+  alert('Gerando relatório financeiro');
+}
+
+window.backupDados = function(){
+  alert('Backup realizado');
+}
+
+window.showDashboard = function(){
+  alert('Você já está no dashboard');
+}
+
+</script>
+
+</body>
+</html>
